@@ -1,0 +1,13 @@
+# Entorno virtual
+.venv/
+
+# PyInstaller (Compilación)
+build/
+dist/
+*.spec
+*.exe
+
+# Python (Archivos temporales)
+__pycache__/
+*.py[cod]
+*$py.class
