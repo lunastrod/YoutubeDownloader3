@@ -5,7 +5,7 @@
 build/
 dist/
 *.spec
-*.exe
+main.exe
 
 # Python (Archivos temporales)
 __pycache__/
