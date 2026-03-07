@@ -1,7 +1,10 @@
 import os
 import re
+import sys
+from io import StringIO
 import mutagen.mp3
 import mutagen.id3
+import syncedlyrics
 
 OS_ILLEGAL_CHARS = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
 NON_PRINTABLE_CHARS = ''.join(chr(i) for i in range(32))
@@ -50,9 +53,14 @@ def _clean_text(text: str, remove_artist: str = "") -> str:
     return text
 
 
-def get_downloaded_urls(directory: str) -> list[str]:
-    """Lee los mp3s de un directorio y devuelve las URLs guardadas en sus metadatos."""
-    urls = []
+def _extract_video_id(url: str) -> str:
+    match = re.search(r"v=([^&]+)", url)
+    return match.group(1) if match else url
+
+
+def get_downloaded_ids(directory: str) -> set[str]:
+    """Lee los mp3s de un directorio y devuelve los video IDs guardados en sus metadatos."""
+    ids = set()
     for file in os.listdir(directory):
         if not file.endswith(".mp3"):
             continue
@@ -60,20 +68,51 @@ def get_downloaded_urls(directory: str) -> list[str]:
         try:
             audio = mutagen.mp3.MP3(path, ID3=mutagen.id3.ID3)
             if audio.tags and "WOAF" in audio.tags:
-                urls.append(audio.tags["WOAF"].url)
+                ids.add(_extract_video_id(audio.tags["WOAF"].url))
         except Exception:
             pass
-    return urls
+    return ids
+
+
+def get_deleted_songs(playlist_urls: list[str], directory: str) -> list[tuple[str, str]]:
+    """Devuelve lista de (path, url) de mp3s locales que ya no están en la playlist."""
+    playlist_ids = set(_extract_video_id(url) for url in playlist_urls)
+    deleted = []
+    for file in os.listdir(directory):
+        if not file.endswith(".mp3"):
+            continue
+        path = os.path.join(directory, file)
+        try:
+            audio = mutagen.mp3.MP3(path, ID3=mutagen.id3.ID3)
+            if audio.tags and "WOAF" in audio.tags:
+                url = audio.tags["WOAF"].url
+                if _extract_video_id(url) not in playlist_ids:
+                    deleted.append((path, url))
+        except Exception:
+            pass
+    return deleted
 
 
 def filter_new_urls(urls: list[str], directory: str) -> list[str]:
     """Devuelve solo las URLs que no están ya descargadas en el directorio."""
-    downloaded = set(get_downloaded_urls(directory))
+    downloaded_ids = get_downloaded_ids(directory)
     new_urls = []
     for url in urls:
-        if url not in downloaded:
+        if _extract_video_id(url) not in downloaded_ids:
             new_urls.append(url)
     return new_urls
+
+
+def find_playlist_duplicates(urls: list[str]) -> list[str]:
+    """Devuelve URLs que aparecen más de una vez en la playlist."""
+    seen = set()
+    duplicates = []
+    for url in urls:
+        vid = _extract_video_id(url)
+        if vid in seen and url not in duplicates:
+            duplicates.append(url)
+        seen.add(vid)
+    return duplicates
 
 
 def embed_metadata(mp3_path: str, metadata: dict, thumbnail_path: str | None) -> None:
@@ -143,3 +182,39 @@ def rename_files(output_dir: str, metadata_list: list[dict]) -> None:
             continue
 
         os.replace(mp3_path, new_path)
+
+
+def _search_lyrics(query: str) -> str | None:
+    """Busca letras suprimiendo el output de syncedlyrics."""
+    devnull = StringIO()
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = devnull, devnull
+    try:
+        return syncedlyrics.search(query)
+    finally:
+        sys.stdout, sys.stderr = old_stdout, old_stderr
+
+
+def embed_lyrics(mp3_path: str, metadata: dict) -> None:
+    """Busca e incrusta letras en el mp3."""
+    artist = metadata.get("artist", "").replace(",", "")
+    title = metadata.get("title", "")
+
+    lyrics = _search_lyrics(f"{artist} {title}")
+    if not lyrics:
+        lyrics = _search_lyrics(title)
+
+    if not lyrics:
+        print(f"Warning: no lyrics found for: {artist} - {title}")
+        return
+
+    try:
+        audio = mutagen.mp3.MP3(mp3_path, ID3=mutagen.id3.ID3)
+        if audio.tags is None:
+            audio.add_tags()
+        audio.tags["USLT::eng"] = mutagen.id3.USLT(encoding=3, lang="eng", desc="Lyrics", text=lyrics)
+        audio.tags.save(mp3_path)
+    except mutagen.id3.error as e:
+        print(f"Warning: could not embed lyrics for {mp3_path}: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: unexpected error embedding lyrics for {mp3_path}: {e}", file=sys.stderr)

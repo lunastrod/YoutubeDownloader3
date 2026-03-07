@@ -14,6 +14,7 @@ pip install -r requirements.txt
 
 compilar en un exe
 pyinstaller --noconsole --onefile --collect-all customtkinter --distpath . src/main.py
+investiga onedir
 
 borrar ficheros de compilacion
 Remove-Item -Recurse -Force build, *.spec, *.exe
