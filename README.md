@@ -13,8 +13,9 @@ instalar requirements
 pip install -r requirements.txt
 
 compilar en un exe
-pyinstaller --noconsole --onefile --collect-all customtkinter --distpath . src/main.py
-investiga onedir
+pyinstaller --noconsole --windowed --onefile --collect-all customtkinter --name YTDownloader --distpath . --specpath build --workpath build src/main.py; Remove-Item -Recurse -Force build
 
 borrar ficheros de compilacion
-Remove-Item -Recurse -Force build, *.spec, *.exe
+Remove-Item -Recurse -Force YTDownloader.exe
+
+auto updater!!!
