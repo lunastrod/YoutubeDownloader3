@@ -1,10 +1,8 @@
-
-# Playlist Downloader
+# Youtube Downloader 3
 
 Herramienta de Windows para descargar playlists de YouTube.
 
 ## Instalación y Uso
-
 
 1. **Descarga como zip de GitHub**:
    - Pulsa en el botón verde "Code"
