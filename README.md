@@ -1,21 +1,16 @@
-# pruebasTkinter
 
-crear vnev
-python -m venv .venv
+# Playlist Downloader
 
-activar venv
-.venv\Scripts\activate
+Herramienta de Windows para descargar playlists de YouTube.
 
-actualizar requirements
-pip freeze > requirements.txt
+## Instalación y Uso
 
-instalar requirements
-pip install -r requirements.txt
 
-compilar en un exe
-pyinstaller --noconsole --windowed --onefile --collect-all customtkinter --name YTDownloader --distpath . --specpath build --workpath build src/main.py; Remove-Item -Recurse -Force build
-
-borrar ficheros de compilacion
-Remove-Item -Recurse -Force YTDownloader.exe
-
-auto updater!!!
+1. **Descarga como zip de GitHub**:
+   - Pulsa en el botón verde "Code"
+   - Pulsa en Download zip
+2. **Descomprimir**
+   - Descomprime el zip 
+3. **Ejecutar**
+   - Ejecuta YTDownloader.exe
+   - Nota: Si Windows muestra un aviso de proteccion, pulsa en "Mas informacion" y luego en "Ejecutar de todos modos".
