@@ -5,7 +5,9 @@
 build/
 dist/
 *.spec
-main.exe
+
+# config
+config/
 
 # Python (Archivos temporales)
 __pycache__/

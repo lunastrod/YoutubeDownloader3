@@ -46,12 +46,22 @@ class Downloader:
         self.runner = ProcessRunner()
         self.browser: str | None = None
 
+    def update_ytdlp(self) -> None:
+        ytdlp = os.path.join(self.bin_dir, "yt-dlp.exe")
+        log.logger.log_verbose("Updating yt-dlp...")
+        _, code = self.runner.run([ytdlp, "-U"])
+        if code == 0:
+            log.logger.log_verbose("yt-dlp updated successfully.")
+        else:
+            log.logger.warning(f"yt-dlp update failed with code {code}.")
+
     # Try each browser in order and set self.browser to the first that works
     def detect_browser(self) -> None:
         ytdlp = os.path.join(self.bin_dir, "yt-dlp.exe")
         node = os.path.join(self.bin_dir, "node.exe")
         test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         for browser in BROWSERS:
+            log.logger.log_verbose(f"Testing browser for cookies: {browser}")
             _, code = self.runner.run([ytdlp, "--cookies-from-browser", browser, "--js-runtimes", f"node:{node}", "--simulate", test_url])
             if code == 0:
                 self.browser = browser
@@ -72,7 +82,7 @@ class Downloader:
     def _base_cmd(self) -> list[str]:
         ytdlp = os.path.join(self.bin_dir, "yt-dlp.exe")
         node = os.path.join(self.bin_dir, "node.exe")
-        cmd = [ytdlp, "--ffmpeg-location", self.bin_dir, "--js-runtimes", f"node:{node}"]
+        cmd = [ytdlp, "--ffmpeg-location", self.bin_dir, "--js-runtimes", f"node:{node}", "--encoding", "utf-8"]
         if self.browser:
             cmd += ["--cookies-from-browser", self.browser]
         return cmd
@@ -87,13 +97,14 @@ class Downloader:
                 with open(dest, "wb") as f:
                     f.write(r.content)
             else:
+                log.logger.warning(f"Thumbnail not found for {video_id}, trying fallback URL")
                 fallback = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
                 r = requests.get(fallback, timeout=10)
                 if r.status_code == 200:
                     with open(dest, "wb") as f:
                         f.write(r.content)
         except Exception as e:
-            log.logger.log(f"Warning: thumbnail failed for {video_id}: {e}")
+            log.logger.warning(f"Warning: thumbnail failed for {video_id}: {e}")
         with lock:
             completed[0] += 1
             on_progress(completed[0], total)
@@ -140,7 +151,9 @@ class Downloader:
 
         _, code = self.runner.run(cmd, lambda line: self._handle_audio_line(line, metadata_list, metadata_lock, total, count))
         with codes_lock:
+            log.logger.log_verbose(f"yt-dlp process exited with code {code} for chunk starting with {chunk[0]}")
             if code not in (0, -15) or (code == -15 and codes[0] == 0):
+                log.logger.warning(f"yt-dlp exited with code {code} for chunk starting with {chunk[0]}")
                 codes[0] = code
 
     # Launch WORKERS parallel yt-dlp processes to download audio

@@ -120,7 +120,7 @@ def embed_metadata(mp3_path: str, metadata: dict, thumbnail_path: str | None) ->
         # Fallback si el título queda vacío tras limpiar (caso del punto ".")
         if not title:
             title = metadata.get("title") if metadata.get("title") else "Track"
-            log.logger.log_verbose(f"Title became empty after cleaning, using fallback: {title} for {artist},{title}")
+            log.logger.warning(f"Title became empty after cleaning, using fallback: {title} for {artist},{title}")
 
         audio.tags.add(mutagen.id3.TIT2(encoding=3, text=title))
         audio.tags.add(mutagen.id3.TALB(encoding=3, text=metadata.get("album", "")))
@@ -139,7 +139,7 @@ def embed_metadata(mp3_path: str, metadata: dict, thumbnail_path: str | None) ->
             ))
         audio.save()
     except Exception as e:
-        log.logger.log(f"Error embedding metadata in {mp3_path}: {e}")
+        log.logger.error(f"Error embedding metadata in {mp3_path}: {e}")
 
 def embed_all(output_dir: str, thumbnails_dir: str, metadata_list: list[dict]) -> None:
     for metadata in metadata_list:
@@ -177,13 +177,13 @@ def rename_files(output_dir: str, metadata_list: list[dict]) -> None:
         new_path = os.path.join(output_dir, new_name)
 
         if os.path.exists(new_path):
-            log.logger.log(f"Warning: file already exists, skipping rename: {new_name}")
+            log.logger.warning(f"Warning: file already exists, skipping rename: {new_name}")
             continue
 
         try:
             os.replace(mp3_path, new_path)
         except Exception as e:
-            log.logger.log(f"Error renaming {mp3_path} to {new_name}: {e}")
+            log.logger.error(f"Error renaming {mp3_path} to {new_name}: {e}")
 
 def _search_lyrics(query: str) -> str | None:
     temp_stdout = StringIO()
@@ -195,7 +195,7 @@ def _search_lyrics(query: str) -> str | None:
     except Exception:
         error_output = temp_stderr.getvalue().strip()
         if error_output:
-            log.logger.log_verbose(f"Lyrics Provider Error: {error_output}")
+            log.logger.warning(f"Lyrics Provider Error: {error_output}")
         return None
     finally:
         sys.stdout, sys.stderr = old_stdout, old_stderr
@@ -203,11 +203,19 @@ def _search_lyrics(query: str) -> str | None:
 def _lyrics_worker(mp3_path: str, metadata_item: dict) -> None:
     artist = _clean_text(metadata_item.get("artist", "Unknown Artist"))
     title = _clean_text(metadata_item.get("title", ""), remove_artist=artist)
-
-    log.logger.log_verbose(f"Searching lyrics: {artist} - {title}")
-    lyrics = _search_lyrics(f"{artist} {title}") or _search_lyrics(title)
-
+    
+    # Use only the first artist for lyrics search
+    primary_artist = artist.split(",")[0].strip()
+    
+    lyrics = (
+        _search_lyrics(f"{primary_artist} {title}") or
+        _search_lyrics(f"{artist} {title}") or
+        _search_lyrics(title)
+    )
+    
+    log.logger.log_verbose(f"Lyrics length for {artist} - {title}: {len(lyrics) if lyrics else 'Not found'}")
     if not lyrics:
+        log.logger.warning(f"Lyrics not found for: {artist} - {title}")
         return
 
     try:
@@ -217,21 +225,16 @@ def _lyrics_worker(mp3_path: str, metadata_item: dict) -> None:
         audio.tags["USLT::eng"] = mutagen.id3.USLT(encoding=3, lang="eng", desc="Lyrics", text=lyrics)
         audio.tags.save(mp3_path)
     except Exception as e:
-        log.logger.log(f"Warning: could not embed lyrics for {mp3_path}: {e}")
+        log.logger.error(f"Error embedding lyrics for {mp3_path}: {e}")
 
 def embed_lyrics(output_dir: str, metadata_list: list[dict]) -> None:
     log.logger.log(f"Fetching lyrics for {len(metadata_list)} songs...")
     with ThreadPoolExecutor(max_workers=10) as executor:
         for entry in metadata_list:
             video_id = extract_video_id(entry.get("url", ""))
-            
-            # Buscamos el archivo por su nombre final (ya renombrado)
-            artist = _clean_text(entry.get("artist", "Unknown Artist"))
-            title = _clean_text(entry.get("title", ""), remove_artist=artist)
-            if not title: title = f"Track_{video_id}"
-            
-            final_name = f"{artist} - {title}.mp3"
-            mp3_path = os.path.join(output_dir, final_name)
-            
+            mp3_path = os.path.join(output_dir, f"{video_id}.mp3")
+
             if os.path.exists(mp3_path):
                 executor.submit(_lyrics_worker, mp3_path, entry)
+            else:
+                log.logger.warning(f"MP3 not found for lyrics: {video_id}.mp3")

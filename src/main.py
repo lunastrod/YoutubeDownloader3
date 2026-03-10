@@ -7,6 +7,7 @@ import downloader as dl
 import metadata
 import thumbnail
 import logger as log
+import config as cfg
 
 
 class DeletedSongsDialog(ctk.CTkToplevel):
@@ -50,6 +51,7 @@ class DeletedSongsDialog(ctk.CTkToplevel):
     def _confirm(self):
         for i, (path, _) in enumerate(self.deleted):
             if self.vars[i].get():
+                log.logger.log(f"Deleted: {os.path.basename(path)}")
                 os.remove(path)
         self.destroy()
 
@@ -59,17 +61,20 @@ class App(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        self.title("Playlist Downloader")
+        self.title("YouTube Downloader 3.1 - by Lunastrod")
         self.geometry("700x560")
         self.resizable(True, True)
-        self.output_dir = os.path.expanduser("~/Downloads")
+        conf = cfg.load()
+        self.output_dir = conf["output_dir"]
         self.downloader = dl.Downloader()
-        self.lyrics_var = tkinter.BooleanVar(value=True)
-        self.verbose_var = tkinter.BooleanVar(value=False)
+        self.downloader.browser = conf["browser"]
+        self.lyrics_var = tkinter.BooleanVar(value=conf["embed_lyrics"])
+        self.verbose_var = tkinter.BooleanVar(value=conf["verbose"])
         self._build_ui()
         log.logger.set_callback(self._log)
+        log.logger.verbose = conf["verbose"]
         log.logger.set_progress_callback(lambda v: self.after(0, self._set_progress, v))
-        self.verbose_var.trace_add("write", lambda *_: setattr(log.logger, "verbose", self.verbose_var.get()))
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._browser_thread = threading.Thread(target=self._detect_browser, daemon=True)
         self._browser_thread.start()
 
@@ -112,16 +117,34 @@ class App(ctk.CTk):
         self.cancel_btn.grid(row=0, column=1, padx=(0, 20))
 
         ctk.CTkCheckBox(btn_frame, text="Embed lyrics", variable=self.lyrics_var).grid(row=0, column=2)
-        ctk.CTkCheckBox(btn_frame, text="Verbose log", variable=self.verbose_var).grid(row=0, column=3, padx=(20, 0))
+        ctk.CTkCheckBox(btn_frame, text="Verbose log", variable=self.verbose_var, command=self._toggle_verbose).grid(row=0, column=3, padx=(20, 0))
+
+    # Sync verbose checkbox with logger
+    def _toggle_verbose(self):
+        log.logger.verbose = self.verbose_var.get()
+
+    # Save config and close the window
+    def _on_close(self):
+        cfg.save({
+            "output_dir": self.output_dir,
+            "embed_lyrics": self.lyrics_var.get(),
+            "verbose": self.verbose_var.get(),
+            "browser": self.downloader.browser,
+        })
+        self.destroy()
 
     # Run browser detection in background and update status label
     def _detect_browser(self):
+        self.after(0, self._set_status, "Updating yt-dlp...")
+        self.downloader.update_ytdlp()
         self.after(0, self._set_status, "Detecting browser...")
         self.downloader.detect_browser()
         if self.downloader.browser:
             self.after(0, self._set_status, f"Using cookies from {self.downloader.browser}")
+            log.logger.log(f"Detected browser for cookies: {self.downloader.browser}")
         else:
             self.after(0, self._set_status, "No browser cookies found, downloads may be rate limited")
+            log.logger.warning("No browser cookies found, downloads may be rate limited")
 
     # Open folder picker dialog and update output directory
     def _pick_folder(self):
@@ -142,9 +165,17 @@ class App(ctk.CTk):
         audio_result["metadata"] = meta
 
     # Append a line to the log box, auto-scrolling only if already at bottom
-    def _log(self, msg: str):
+    def _log(self, msg: str, color: str | None = None):
+        self.after(0, self._write_line, msg, color)
+
+    def _write_line(self, msg: str, color: str | None = None):
         self.log_box.configure(state="normal")
-        self.log_box.insert("end", msg + "\n")
+        if color:
+            tag = f"color_{color}"
+            self.log_box.tag_config(tag, foreground=color)
+            self.log_box.insert("end", msg + "\n", tag)
+        else:
+            self.log_box.insert("end", msg + "\n")
         at_bottom = self.log_box.yview()[1] >= 0.99
         if at_bottom:
             self.log_box.see("end")
@@ -162,7 +193,7 @@ class App(ctk.CTk):
     def _start_download(self):
         url = self.url_entry.get().strip()
         if not url:
-            self._log("Please enter a URL.")
+            log.logger.warning("Please enter a URL.")
             return
         self.download_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
@@ -176,29 +207,27 @@ class App(ctk.CTk):
             # Ensure browser detection is done before starting downloads
             self._browser_thread.join()
 
-            # All UI updates must be done via self.after to run in the main thread
             # 1: Fetch playlist URLs
             self.after(0, self._set_status, "Fetching playlist URLs...")
             all_urls = self.downloader.get_playlist_urls(playlist_url)
-            self.after(0, self._log, f"Songs in playlist: {len(all_urls)}")
+            log.logger.log(f"Songs in playlist: {len(all_urls)}")
 
             # 2: Check for duplicates within the playlist itself
             duplicates = metadata.find_playlist_duplicates(all_urls)
             for dup in duplicates:
-                self.after(0, self._log, f"Duplicate in playlist: {dup}")
+                log.logger.warning(f"Duplicate in playlist: {dup}")
 
             # 3: Filter out already downloaded songs
             new_urls = metadata.filter_new_urls(all_urls, self.output_dir)
-            self.after(0, self._log, f"New songs: {len(new_urls)}")
+            log.logger.log(f"New songs: {len(new_urls)}")
 
             if not new_urls:
                 self.after(0, self._set_status, "No new songs to download.")
+                log.logger.log("No new songs to download.")
                 return
 
-            # 4: Download audio and thumbnails in parallel threads, updating progress
-            total = len(new_urls)
+            # 4: Download audio and thumbnails in parallel threads
             audio_result = {"code": 0, "metadata": []}
-
             self.after(0, self._set_status, "Downloading audio and thumbnails...")
             self.after(0, self._set_progress, 0)
 
@@ -214,28 +243,36 @@ class App(ctk.CTk):
 
             if code == -15:
                 self.after(0, self._set_status, "Download cancelled.")
+                log.logger.warning("Download cancelled.")
             else:
                 if code != 0:
-                    self.after(0, self._log, f"yt-dlp exited with code {code}, continuing post-processing...")
-                # 5: Embed metadata and lyrics
+                    log.logger.error(f"yt-dlp exited with code {code}, continuing post-processing...")
+                # 5: Embed metadata and thumbnails
                 self.after(0, self._set_status, "Embedding metadata...")
+                log.logger.log("Embedding metadata and processing thumbnails...")
                 metadata.embed_all(self.output_dir, thumbnails_dir, metadata_list)
+                # 6: Fetch and embed lyrics
                 if self.lyrics_var.get():
+                    log.logger.log("Fetching and embedding lyrics...")
                     self.after(0, self._set_status, "Fetching lyrics...")
-                    metadata.embed_lyrics(self.output_dir, metadata_list)                # 6: Rename files based on metadata
+                    metadata.embed_lyrics(self.output_dir, metadata_list)
+                # 7: Rename files based on metadata
                 self.after(0, self._set_status, "Renaming files...")
+                log.logger.log("Renaming files based on metadata...")
                 metadata.rename_files(self.output_dir, metadata_list)
                 self.after(0, self._set_status, "Done.")
                 self.after(0, self._set_progress, 1)
-                # 7: Check for deleted songs and show dialog
+                # 8: Check for deleted songs and show dialog
                 deleted = metadata.get_deleted_songs(all_urls, self.output_dir)
+                log.logger.log(f"Deleted songs detected: {len(deleted)}")
                 if deleted:
                     self.after(0, lambda d=deleted: DeletedSongsDialog(self, d))
+                log.logger.log(f"Done. {len(metadata_list)} songs downloaded.")
 
         except FileNotFoundError:
-            self.after(0, self._log, f"yt-dlp.exe not found in: {self.downloader.bin_dir}")
+            log.logger.error(f"yt-dlp.exe not found in: {self.downloader.bin_dir}")
         except Exception as e:
-            self.after(0, self._log, f"Error: {e}")
+            log.logger.error(f"Error: {e}")
         finally:
             if os.path.exists(thumbnails_dir):
                 shutil.rmtree(thumbnails_dir)

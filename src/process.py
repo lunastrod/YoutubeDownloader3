@@ -12,8 +12,7 @@ class ProcessRunner:
 
     # Run a command. If on_line is provided, streams stdout line by line. Returns (stdout, returncode).
     def run(self, cmd: list[str], on_line: Callable[[str], None] | None = None) -> tuple[str, int]:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        # Add the process to the list of active processes
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",creationflags=subprocess.CREATE_NO_WINDOW)        # Add the process to the list of active processes
         with self.lock:
             self.processes.append(proc)
         exe = os.path.basename(cmd[0])
@@ -28,7 +27,7 @@ class ProcessRunner:
         proc.wait()
         # Read stderr after stdout is done
         for line in proc.stderr.read().splitlines():
-            log.logger.log_verbose(f"STDOUT {exe}: {line}")
+            log.logger.log_verbose(f"STDERR {exe}: {line}")
         code = proc.returncode
         # Remove the process from the list of active processes
         with self.lock:
