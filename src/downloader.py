@@ -30,12 +30,19 @@ def _thumbnail_url(video_id: str) -> str:
 def _parse_metadata(line: str) -> dict | None:
     parts = line.split("\x1f")
     if len(parts) < 5:
+        log.logger.error(f"Error: malformed metadata line: {line}")
         return None
     title, album, artist, uploader, url = parts
+    if album == "NA":
+        album = title
+        log.logger.warning(f"Warning: no album metadata for {title}, using title as album")
+    if artist == "NA":
+        artist = uploader
+        log.logger.log_verbose(f"Warning: no artist metadata for {title}, using uploader as artist")
     return {
         "title": title,
-        "album": album if album != "NA" else title,
-        "artist": artist if artist != "NA" else uploader,
+        "album": album,
+        "artist": artist,
         "url": url,
     }
 
