@@ -70,6 +70,8 @@ class Downloader:
 
     # Fetch all video URLs from a playlist without downloading
     def get_playlist_urls(self, url: str) -> list[str]:
+        if "list=" not in url:
+            return url.split()
         ytdlp = os.path.join(self.bin_dir, "yt-dlp.exe")
         stdout, _ = self.runner.run([ytdlp, "--flat-playlist", "--print", "%(url)s", url])
         urls = []
