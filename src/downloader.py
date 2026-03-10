@@ -34,8 +34,7 @@ def _parse_metadata(line: str) -> dict | None:
         return None
     title, album, artist, uploader, url = parts
     if album == "NA":
-        album = title
-        log.logger.warning(f"Warning: no album metadata for {title}, using title as album")
+        log.logger.warning(f"Warning: no album metadata for {title}")
     if artist == "NA":
         artist = uploader
         log.logger.log_verbose(f"Warning: no artist metadata for {title}, using uploader as artist")
